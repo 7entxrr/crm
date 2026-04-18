@@ -143,7 +143,7 @@ export async function POST(req: Request) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Evohus OTP</title>
+    <title>Clear Lands OTP</title>
   </head>
   <body style="margin:0;padding:0;background:#f6f8fb;">
     <div style="padding:28px 16px;">
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
         <tr>
           <td style="padding:0 0 14px 0;">
             <div style="display:inline-block;padding:10px 14px;border-radius:14px;background:#0b1220;color:#ffffff;font:600 12px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;">
-              EVOHUS
+              Clear Lands
             </div>
           </td>
         </tr>
@@ -162,7 +162,7 @@ export async function POST(req: Request) {
                 Your login verification code
               </div>
               <div style="margin-top:8px;font:500 13px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#475569;">
-                We received a request to sign in to your <b>Evohus Admin</b> account. To continue, please enter the one-time verification code below.
+                We received a request to sign in to your <b>Clear Lands Admin</b> account. To continue, please enter the one-time verification code below.
                 This code will expire in <b>${expiryText}</b> for your security.
               </div>
               <div style="margin-top:10px;font:500 12px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#64748b;">
@@ -188,8 +188,8 @@ export async function POST(req: Request) {
               <div style="border-top:1px solid rgba(15,23,42,0.06);margin-top:12px;padding-top:14px;font:500 12px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#64748b;">
                 Security tips:
                 <ul style="margin:10px 0 0 18px;padding:0;color:#64748b;">
-                  <li style="margin:0 0 6px 0;">Never share this code with anyone, including Evohus support.</li>
-                  <li style="margin:0 0 6px 0;">Evohus will never ask you for your OTP over phone, WhatsApp, or email.</li>
+                  <li style="margin:0 0 6px 0;">Never share this code with anyone, including Clear Lands support.</li>
+                  <li style="margin:0 0 6px 0;">Clear Lands will never ask you for your OTP over phone, WhatsApp, or email.</li>
                   <li style="margin:0;">If you did not request this code, ignore this email and consider changing your password.</li>
                 </ul>
               </div>
@@ -198,7 +198,7 @@ export async function POST(req: Request) {
         </tr>
         <tr>
           <td style="padding:14px 4px 0 4px;font:500 11px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#94a3b8;text-align:center;">
-            © ${new Date().getFullYear()} Evohus. This message was sent automatically.
+            © ${new Date().getFullYear()} Clear Lands. This message was sent automatically.
           </td>
         </tr>
       </table>
@@ -209,7 +209,7 @@ export async function POST(req: Request) {
     await transporter.sendMail({
       from: smtp.from,
       to: email,
-      subject: "Evohus Admin OTP",
+      subject: "Clear Lands Admin OTP",
       text: `Your OTP is ${otp}. It expires in ${expiresInMin} minutes.`,
       html,
     });

@@ -82,13 +82,13 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem("evohus_admin_session");
+    const raw = window.localStorage.getItem("clearlands_admin_session");
     if (raw) router.replace(nextPath);
   }, [router, nextPath]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem("evohus_pending_otp");
+    const raw = window.localStorage.getItem("clearlands_pending_otp");
     if (!raw) return;
     try {
       const pending = JSON.parse(raw) as { email?: string; name?: string; next?: string } | null;
@@ -99,7 +99,7 @@ export default function LoginPage() {
       setPendingName(pending?.name ?? "");
       setAwaitingOtp(true);
     } catch {
-      window.localStorage.removeItem("evohus_pending_otp");
+      window.localStorage.removeItem("clearlands_pending_otp");
     }
   }, [router, nextPath]);
 
@@ -114,7 +114,7 @@ export default function LoginPage() {
                 <LogoMark />
               </div>
               <div className="text-sm font-semibold tracking-wide">
-                <span className="text-emerald-400">EVO</span>HUS
+                Clear Lands
               </div>
             </div>
 
@@ -183,7 +183,7 @@ export default function LoginPage() {
                   <LogoMark />
                 </div>
                 <div className="text-sm font-semibold tracking-wide">
-                  Evohus Admin
+                  Clear Lands Admin
                 </div>
               </div>
             </div>
@@ -220,14 +220,14 @@ export default function LoginPage() {
                       });
                       if (typeof window !== "undefined") {
                         window.localStorage.setItem(
-                          "evohus_admin_session",
+                          "clearlands_admin_session",
                           JSON.stringify({
                             email: normalized,
                             name: pendingName,
                             createdAt: Date.now(),
                           }),
                         );
-                        window.localStorage.removeItem("evohus_pending_otp");
+                        window.localStorage.removeItem("clearlands_pending_otp");
                       }
                       router.replace(nextPath);
                       return;
@@ -266,7 +266,7 @@ export default function LoginPage() {
                       );
                       if (typeof window !== "undefined") {
                         window.localStorage.setItem(
-                          "evohus_pending_otp",
+                          "clearlands_pending_otp",
                           JSON.stringify({
                             email: normalized,
                             name: adminData?.name ?? "",
@@ -285,7 +285,7 @@ export default function LoginPage() {
 
                     if (typeof window !== "undefined") {
                       window.localStorage.setItem(
-                        "evohus_admin_session",
+                        "clearlands_admin_session",
                         JSON.stringify({
                           email: normalized,
                           name: adminData?.name ?? "",

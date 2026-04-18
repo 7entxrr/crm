@@ -9,6 +9,7 @@ import {
   TrendingUp,
   User,
   Users,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ export type SidebarIconKey =
   | "customer"
   | "tracking"
   | "analyse"
+  | "upload-leads"
   | "settings";
 
 export type SidebarItem = {
@@ -44,6 +46,7 @@ const iconMap: Record<
   customer: User,
   tracking: Activity,
   analyse: PieChart,
+  "upload-leads": Upload,
   settings: Settings,
 };
 

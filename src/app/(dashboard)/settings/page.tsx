@@ -28,7 +28,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem("evohus_admin_session");
+    const raw = window.localStorage.getItem("clearlands_admin_session");
     if (!raw) return;
     try {
       const session = JSON.parse(raw) as { email?: string; name?: string } | null;
@@ -166,10 +166,10 @@ export default function SettingsPage() {
 
                     setInitialName(trimmed);
                     if (typeof window !== "undefined") {
-                      const raw = window.localStorage.getItem("evohus_admin_session");
+                      const raw = window.localStorage.getItem("clearlands_admin_session");
                       const session = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
                       window.localStorage.setItem(
-                        "evohus_admin_session",
+                        "clearlands_admin_session",
                         JSON.stringify({ ...session, email, name: trimmed }),
                       );
                     }
@@ -340,7 +340,7 @@ export default function SettingsPage() {
                     Workspace Name
                   </div>
                   <div className="mt-1 text-sm font-semibold text-slate-900">
-                    Evohus Admin
+                    Clear Lands Admin
                   </div>
                 </div>
                 <button className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#0b1220] px-4 text-sm font-semibold text-white hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200">

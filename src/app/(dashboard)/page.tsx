@@ -50,7 +50,7 @@ type AdminSession = { email?: string; name?: string } | null;
 
 function readSession(): AdminSession {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem("evohus_admin_session");
+  const raw = window.localStorage.getItem("clearlands_admin_session");
   if (!raw) return null;
   try {
     return JSON.parse(raw) as AdminSession;
@@ -288,23 +288,27 @@ export default function DashboardPage() {
   // Calculate real lead sources from data
   const realLeadSources = useMemo(() => {
     const sources: Record<string, Record<string, number>> = {
-      social: {},
-      thirdParty: {},
+      realEstate: {},
+      socialMedia: {},
+      direct: {},
       others: {}
     };
 
     leads.forEach(lead => {
       const source = (lead.source || 'unknown').toLowerCase();
       
-      // Categorize sources
-      if (source.includes('facebook') || source.includes('instagram') || 
-          source.includes('linkedin') || source.includes('google') || 
-          source.includes('gmail') || source.includes('social')) {
-        sources.social[source] = (sources.social[source] || 0) + 1;
-      } else if (source.includes('housing') || source.includes('magicbricks') || 
-                 source.includes('99acres') || source.includes('quikr') || 
-                 source.includes('just lead') || source.includes('square yards')) {
-        sources.thirdParty[source] = (sources.thirdParty[source] || 0) + 1;
+      // Categorize sources more accurately
+      if (source.includes('99acres') || source.includes('magicbricks') || 
+          source.includes('housing') || source.includes('quikr') || 
+          source.includes('square yards') || source.includes('just lead')) {
+        sources.realEstate[source] = (sources.realEstate[source] || 0) + 1;
+      } else if (source.includes('facebook') || source.includes('instagram') || 
+                 source.includes('linkedin') || source.includes('whatsapp')) {
+        sources.socialMedia[source] = (sources.socialMedia[source] || 0) + 1;
+      } else if (source.includes('call') || source.includes('website') || 
+                 source.includes('referral') || source.includes('email') || 
+                 source.includes('google')) {
+        sources.direct[source] = (sources.direct[source] || 0) + 1;
       } else {
         sources.others[source] = (sources.others[source] || 0) + 1;
       }
@@ -366,7 +370,7 @@ export default function DashboardPage() {
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
                 <span className="text-white font-bold text-lg">DS</span>
               </div>
-              <h1 className="text-xl font-bold text-gray-900">Dhinwa Solutions Pvt. Ltd.</h1>
+              <h1 className="text-xl font-bold text-gray-900">Clear Lands</h1>
             </div>
             <div className="flex items-center space-x-2 bg-white rounded-lg px-3 py-2 shadow-md">
               <span className="text-sm text-gray-600">Team Dashboard</span>
@@ -489,6 +493,47 @@ export default function DashboardPage() {
               <div className="bg-red-50 rounded-lg p-4 border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
                 <div className="text-xl font-bold text-red-700">{overdueLeads}</div>
                 <div className="text-sm text-red-600">Overdue</div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Lead Source Cards */}
+        <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          {isLoading ? (
+            <>
+              {[...Array(6)].map((_, index) => (
+                <div key={index} className="bg-white rounded-lg p-4 border border-gray-200 animate-pulse">
+                  <div className="h-6 bg-gray-200 rounded w-3/4 mb-2"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-indigo-700">{realLeadSources.realEstate['99acres'] || 0}</div>
+                <div className="text-sm text-indigo-600">99acres</div>
+              </div>
+              <div className="bg-pink-50 rounded-lg p-4 border border-pink-200 hover:bg-pink-100 hover:border-pink-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-pink-700">{realLeadSources.realEstate['magicbricks'] || 0}</div>
+                <div className="text-sm text-pink-600">Magic Bricks</div>
+              </div>
+              <div className="bg-teal-50 rounded-lg p-4 border border-teal-200 hover:bg-teal-100 hover:border-teal-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-teal-700">{realLeadSources.realEstate['housing'] || 0}</div>
+                <div className="text-sm text-teal-600">Housing</div>
+              </div>
+              <div className="bg-orange-50 rounded-lg p-4 border border-orange-200 hover:bg-orange-100 hover:border-orange-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-orange-700">{realLeadSources.realEstate['quikr'] || 0}</div>
+                <div className="text-sm text-orange-600">Quikr</div>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200 hover:bg-purple-100 hover:border-purple-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-purple-700">{realLeadSources.socialMedia['facebook'] || 0}</div>
+                <div className="text-sm text-purple-600">Facebook</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
+                <div className="text-xl font-bold text-slate-700">{realLeadSources.direct['website'] || 0}</div>
+                <div className="text-sm text-slate-600">Website</div>
               </div>
             </>
           )}
@@ -703,16 +748,39 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Social Profiles */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {/* Real Estate Platforms */}
               <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-4">social profiles</h3>
+                <h3 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                  <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                  Real Estate Platforms
+                </h3>
                 <div className="space-y-3">
-                  {Object.entries(realLeadSources.social).length > 0 ? (
-                    Object.entries(realLeadSources.social).map(([name, count]) => (
-                      <div key={name} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
+                  {Object.entries(realLeadSources.realEstate).length > 0 ? (
+                    Object.entries(realLeadSources.realEstate).map(([name, count]) => (
+                      <div key={name} className="flex items-center justify-between bg-blue-50 rounded-lg px-4 py-3 border border-blue-200">
                         <span className="text-sm text-gray-700 capitalize">{name}</span>
-                        <span className="text-sm font-medium text-gray-900">{count}</span>
+                        <span className="text-sm font-medium text-blue-700">{count}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-500 italic">No real estate leads yet</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Social Media */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                  <span className="w-2 h-2 bg-purple-500 rounded-full mr-2"></span>
+                  Social Media
+                </h3>
+                <div className="space-y-3">
+                  {Object.entries(realLeadSources.socialMedia).length > 0 ? (
+                    Object.entries(realLeadSources.socialMedia).map(([name, count]) => (
+                      <div key={name} className="flex items-center justify-between bg-purple-50 rounded-lg px-4 py-3 border border-purple-200">
+                        <span className="text-sm text-gray-700 capitalize">{name}</span>
+                        <span className="text-sm font-medium text-purple-700">{count}</span>
                       </div>
                     ))
                   ) : (
@@ -721,26 +789,32 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 3rd Party */}
+              {/* Direct Sources */}
               <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-4">3rd party</h3>
+                <h3 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                  <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                  Direct Sources
+                </h3>
                 <div className="space-y-3">
-                  {Object.entries(realLeadSources.thirdParty).length > 0 ? (
-                    Object.entries(realLeadSources.thirdParty).map(([name, count]) => (
-                      <div key={name} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
+                  {Object.entries(realLeadSources.direct).length > 0 ? (
+                    Object.entries(realLeadSources.direct).map(([name, count]) => (
+                      <div key={name} className="flex items-center justify-between bg-green-50 rounded-lg px-4 py-3 border border-green-200">
                         <span className="text-sm text-gray-700 capitalize">{name}</span>
-                        <span className="text-sm font-medium text-gray-900">{count}</span>
+                        <span className="text-sm font-medium text-green-700">{count}</span>
                       </div>
                     ))
                   ) : (
-                    <div className="text-sm text-gray-500 italic">No 3rd party leads yet</div>
+                    <div className="text-sm text-gray-500 italic">No direct leads yet</div>
                   )}
                 </div>
               </div>
 
               {/* Others */}
               <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-4">others</h3>
+                <h3 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                  <span className="w-2 h-2 bg-gray-500 rounded-full mr-2"></span>
+                  Other Sources
+                </h3>
                 <div className="space-y-3">
                   {Object.entries(realLeadSources.others).length > 0 ? (
                     Object.entries(realLeadSources.others).map(([name, count]) => (

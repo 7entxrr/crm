@@ -8,7 +8,7 @@ type AdminSession = { email?: string; name?: string } | null;
 
 function readSession(): AdminSession {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem("evohus_admin_session");
+  const raw = window.localStorage.getItem("clearlands_admin_session");
   if (!raw) return null;
   try {
     return JSON.parse(raw) as AdminSession;

@@ -65,7 +65,7 @@ const defaultWhatsAppTemplates: WhatsAppTemplate[] = [
   {
     id: "intro",
     label: "Intro Message",
-    body: "Hi {name}, this is Evohus. Thank you for your interest. Can you share your preferred budget, location, and move-in timeline?",
+    body: "Hi {name}, this is Clear Lands. Thank you for your interest. Can you share your preferred budget, location, and move-in timeline?",
   },
   {
     id: "follow_up",
@@ -227,7 +227,7 @@ export default function LeadsPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem("evohus_wa_templates");
+    const raw = window.localStorage.getItem("clearlands_wa_templates");
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -248,7 +248,7 @@ export default function LeadsPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("evohus_wa_templates", JSON.stringify(waTemplates));
+    window.localStorage.setItem("clearlands_wa_templates", JSON.stringify(waTemplates));
   }, [waTemplates]);
 
   useEffect(() => {

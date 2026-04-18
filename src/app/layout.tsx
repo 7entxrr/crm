@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Evohus Dashboard",
+  title: "Clear Lands",
   description: "Real estate dashboard UI",
 };
 

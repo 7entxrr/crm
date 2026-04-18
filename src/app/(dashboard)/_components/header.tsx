@@ -43,7 +43,7 @@ type AdminSession = { email?: string; name?: string } | null;
 
 function readSession(): AdminSession {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem("evohus_admin_session");
+  const raw = window.localStorage.getItem("clearlands_admin_session");
   if (!raw) return null;
   try {
     return JSON.parse(raw) as AdminSession;
@@ -87,7 +87,7 @@ export default function DashboardHeader({
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window === "undefined") return "light";
-    const stored = window.localStorage.getItem("evohus_theme");
+    const stored = window.localStorage.getItem("clearlands_theme");
     return stored === "dark" ? "dark" : "light";
   });
 
@@ -101,7 +101,7 @@ export default function DashboardHeader({
   useEffect(() => {
     applyTheme(theme);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("evohus_theme", theme);
+      window.localStorage.setItem("clearlands_theme", theme);
     }
   }, [theme]);
 
@@ -487,7 +487,7 @@ export default function DashboardHeader({
           <div className="absolute inset-y-0 left-0 w-[280px] bg-[#0b1220] text-slate-200 shadow-2xl">
             <div className="flex h-16 items-center justify-between px-5">
               <div className="text-sm font-semibold tracking-wide">
-                <span className="text-emerald-400">EVO</span>HUS
+                Clear Lands
               </div>
               <button
                 type="button"

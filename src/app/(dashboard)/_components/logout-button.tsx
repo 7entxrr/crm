@@ -14,7 +14,7 @@ export default function LogoutButton({ className }: { className?: string }) {
       type="button"
       onClick={async () => {
         if (typeof window !== "undefined") {
-          window.localStorage.removeItem("evohus_admin_session");
+          window.localStorage.removeItem("clearlands_admin_session");
         }
         router.replace("/login");
       }}

@@ -24,7 +24,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     queueMicrotask(() => {
-      const raw = window.localStorage.getItem("evohus_admin_session");
+      const raw = window.localStorage.getItem("clearlands_admin_session");
       setSignedIn(Boolean(raw));
       setReady(true);
     });

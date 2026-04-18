@@ -18,11 +18,17 @@ const sidebarSections: SidebarSection[] = [
     ],
   },
   {
-    title: "Apps",
+    title: "Lead Management",
     items: [
-      { label: "Employees", icon: "employees", href: "/employees" },
+      { label: "Upload Leads", icon: "upload-leads", href: "/upload-leads" },
       { label: "Leads", icon: "leads", href: "/leads" },
       { label: "Tracking", icon: "tracking", href: "/tracking" },
+    ],
+  },
+  {
+    title: "Management",
+    items: [
+      { label: "Employees", icon: "employees", href: "/employees" },
       { label: "Analyse", icon: "analyse", href: "/analyse" },
       { label: "Settings", icon: "settings", href: "/settings" },
     ],
@@ -31,6 +37,7 @@ const sidebarSections: SidebarSection[] = [
 
 const tabs = [
   { label: "Dashboard", href: "/" },
+  { label: "Upload Leads", href: "/upload-leads" },
   { label: "Employees", href: "/employees" },
   { label: "Leads", href: "/leads" },
   { label: "Tracking", href: "/tracking" },
@@ -49,7 +56,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 <LogoMark />
               </div>
               <div className="text-sm font-semibold tracking-wide">
-                <span className="text-emerald-400">EVO</span>HUS
+                Clear Lands
               </div>
             </div>
           </div>
