@@ -1,19 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { 
-  BarChart3, 
-  PieChart, 
   Users, 
   Info, 
   ChevronDown, 
   Phone, 
-  MessageSquare, 
-  Mail, 
   Calendar,
   MapPin,
   TrendingUp,
-  Activity,
   Filter
 } from "lucide-react";
 import {
@@ -24,7 +19,6 @@ import {
   query,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Card } from "./_components/ui";
 
 type StaffRow = {
   id: string;
@@ -43,14 +37,6 @@ type LeadRow = {
   status?: string;
   source?: string;
 };
-
-type ResponseKey =
-  | "Picked"
-  | "Busy"
-  | "Interested"
-  | "Schedule"
-  | "Not Interested"
-  | "Other";
 
 type CallResponseRow = {
   id: string;
@@ -73,35 +59,6 @@ function readSession(): AdminSession {
   }
 }
 
-function normalizeResponse(raw: unknown): ResponseKey {
-  const v = String(raw ?? "").trim().toLowerCase();
-  if (!v) return "Other";
-  if (v === "picked") return "Picked";
-  if (v === "busy") return "Busy";
-  if (v === "interested") return "Interested";
-  if (v === "schedule" || v === "scheduled") return "Schedule";
-  if (v === "not interested" || v === "not_interested" || v === "notinterested")
-    return "Not Interested";
-  return "Other";
-}
-
-function colorForResponse(key: ResponseKey) {
-  if (key === "Picked") return "rgba(16,185,129,0.95)";
-  if (key === "Interested") return "rgba(59,130,246,0.95)";
-  if (key === "Schedule") return "rgba(139,92,246,0.95)";
-  if (key === "Busy") return "rgba(15,23,42,0.75)";
-  if (key === "Not Interested") return "rgba(244,63,94,0.9)";
-  return "rgba(148,163,184,0.95)";
-}
-
-const responseOrder: ResponseKey[] = [
-  "Picked",
-  "Interested",
-  "Schedule",
-  "Busy",
-  "Not Interested",
-  "Other",
-];
 
 function monthKeyFromDate(d: Date) {
   return d.getFullYear() * 12 + d.getMonth();
@@ -130,18 +87,10 @@ function startOfWeekMs(d: Date) {
 
 // Activity data will be calculated dynamically from real response data
 
-// Loading skeleton component
-const LoadingSkeleton = () => (
-  <div className="animate-pulse">
-    <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-    <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-    <div className="h-4 bg-gray-200 rounded w-2/3 mb-2"></div>
-  </div>
-);
 
 export default function DashboardPage() {
+  const currentTime = useRef(Date.now());
   const [adminName, setAdminName] = useState("");
-  const [adminEmail, setAdminEmail] = useState("");
   const [showLeadsFromSource, setShowLeadsFromSource] = useState(false);
   const [showWithTeam, setShowWithTeam] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
@@ -156,12 +105,10 @@ export default function DashboardPage() {
     values: [],
   });
   const [responseWeeks, setResponseWeeks] = useState<number[]>([]);
-
   useEffect(() => {
     queueMicrotask(() => {
       const session = readSession();
       setAdminName(session?.name ?? "");
-      setAdminEmail(session?.email ?? "");
     });
   }, []);
 
@@ -325,11 +272,11 @@ export default function DashboardPage() {
   const siteVisitScheduledLeads = leads.filter(l => 
     l.status === 'site visit scheduled' || l.status === 'site visit'
   ).length;
-  const overdueLeads = leads.filter(l => {
+  const overdueLeads = useMemo(() => leads.filter(l => {
     if (!l.createdAt) return false;
-    const daysSinceCreation = (Date.now() - l.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+    const daysSinceCreation = (currentTime.current - l.createdAt.getTime()) / (1000 * 60 * 60 * 24);
     return daysSinceCreation > 7 && (l.status === 'new' || l.status === 'pending');
-  }).length;
+  }).length, [leads, currentTime.current]);
 
   const siteVisitDone = leads.filter(l => 
     l.status === 'site visit done' || l.status === 'visited'
@@ -395,43 +342,7 @@ export default function DashboardPage() {
     },
   ], [newLeads, pendingLeads, callbacksLeads, siteVisitScheduledLeads, siteVisitDone, bookedLeads]);
 
-  // Dynamic activity data from real responses
-  const activityData = useMemo(() => {
-    const activities = {
-      WhatsApp: 0,
-      Call: 0,
-      SMS: 0,
-      Email: 0,
-    };
-
-    responses.forEach(response => {
-      // This would need to be enhanced based on your actual response data structure
-      // For now, we'll distribute responses evenly
-      const responseType = response.response?.toLowerCase() || '';
-      if (responseType.includes('whatsapp') || responseType.includes('chat')) {
-        activities.WhatsApp++;
-      } else if (responseType.includes('call') || responseType.includes('phone')) {
-        activities.Call++;
-      } else if (responseType.includes('sms') || responseType.includes('text')) {
-        activities.SMS++;
-      } else if (responseType.includes('email') || responseType.includes('mail')) {
-        activities.Email++;
-      } else {
-        // Default distribution for unclassified responses
-        const types = ['WhatsApp', 'Call', 'SMS', 'Email'] as const;
-        const randomType = types[Math.floor(Math.random() * types.length)];
-        activities[randomType]++;
-      }
-    });
-
-    return [
-      { type: "WhatsApp", count: activities.WhatsApp, icon: MessageSquare, color: "text-green-500" },
-      { type: "Call", count: activities.Call, icon: Phone, color: "text-blue-500" },
-      { type: "SMS", count: activities.SMS, icon: MessageSquare, color: "text-purple-500" },
-      { type: "Email", count: activities.Email, icon: Mail, color: "text-yellow-500" },
-    ];
-  }, [responses]);
-
+  
   return (
     <>
       <style jsx>{`
@@ -540,6 +451,8 @@ export default function DashboardPage() {
               </div>
             </>
           )}
+        </div>
+
         {/* Action Cards */}
         <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-6">
           {isLoading ? (
@@ -579,72 +492,6 @@ export default function DashboardPage() {
               </div>
             </>
           )}
-        {/* Action Cards */}
-        <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-6">
-          {isLoading ? (
-            <>
-              {[...Array(6)].map((_, index) => (
-                <div key={index} className="bg-white rounded-lg p-4 border border-gray-200 animate-pulse">
-                  <div className="h-6 bg-gray-200 rounded w-3/4 mb-2"></div>
-                  <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-                </div>
-              ))}
-            </>
-          ) : (
-            <>
-              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-blue-700">{newLeads}</div>
-                <div className="text-sm text-blue-600">New</div>
-              </div>
-              <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-yellow-700">{pendingLeads}</div>
-                <div className="text-sm text-yellow-600">Pending</div>
-              </div>
-              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200 hover:bg-purple-100 hover:border-purple-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-purple-700">{callbacksLeads}</div>
-                <div className="text-sm text-purple-600">Callbacks</div>
-              </div>
-              <div className="bg-green-50 rounded-lg p-4 border border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-green-700">{meetingScheduledLeads}</div>
-                <div className="text-sm text-green-600">Meeting scheduled</div>
-              </div>
-              <div className="bg-orange-50 rounded-lg p-4 border border-orange-200 hover:bg-orange-100 hover:border-orange-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-orange-700">{siteVisitScheduledLeads}</div>
-                <div className="text-sm text-orange-600">Site visit scheduled</div>
-              </div>
-              <div className="bg-red-50 rounded-lg p-4 border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-                <div className="text-xl font-bold text-red-700">{overdueLeads}</div>
-                <div className="text-sm text-red-600">Overdue</div>
-              </div>
-            </>
-          )}
-        <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-6">
-          {isLoading ? (
-            <>
-              {[...Array(6)].map((_, index) => (
-                <div key={index} className="bg-white rounded-lg p-4 border border-gray-200 animate-pulse">
-                  <div className="h-6 bg-gray-200 rounded w-3/4 mb-2"></div>
-                  <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-          <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-            <div className="text-xl font-bold text-yellow-700">{pendingLeads}</div>
-            <div className="text-sm text-yellow-600">Pending</div>
-          </div>
-          <div className="bg-purple-50 rounded-lg p-4 border border-purple-200 hover:bg-purple-100 hover:border-purple-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-            <div className="text-xl font-bold text-purple-700">{callbacksLeads}</div>
-            <div className="text-sm text-purple-600">Callbacks</div>
-          </div>
-          <div className="bg-green-50 rounded-lg p-4 border border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-            <div className="text-xl font-bold text-green-700">{meetingScheduledLeads}</div>
-            <div className="text-sm text-green-600">Meeting scheduled</div>
-          </div>
-          <div className="bg-orange-50 rounded-lg p-4 border border-orange-200 hover:bg-orange-100 hover:border-orange-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-            <div className="text-xl font-bold text-orange-700">{siteVisitScheduledLeads}</div>
-            <div className="text-sm text-orange-600">Site visit scheduled</div>
-          </div>
-          <div className="bg-red-50 rounded-lg p-4 border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 hover:shadow-lg cursor-pointer">
-            <div className="text-xl font-bold text-red-700">{overdueLeads}</div>
-            <div className="text-sm text-red-600">Overdue</div>
-          </div>
         </div>
 
         {/* Main Content Grid */}
@@ -694,6 +541,9 @@ export default function DashboardPage() {
                   <div className="text-2xl font-bold text-red-700">{siteVisitNotDone}</div>
                   <div className="text-sm text-red-600">Site visit not done</div>
                 </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Analytics Dashboard */}
