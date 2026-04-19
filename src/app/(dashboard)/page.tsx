@@ -459,19 +459,7 @@ export default function DashboardPage() {
         }
       `}</style>
       <div className="min-h-screen bg-gray-50 text-gray-900">
-      {/* Top Navigation */}
-      <div className="border-b border-gray-200 bg-gradient-to-r from-white to-gray-50 px-6 py-4 shadow-lg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-                <span className="text-white font-bold text-lg">DS</span>
-              </div>
-              <h1 className="text-xl font-bold text-gray-900">Clear Lands</h1>
-            </div>
-          </div>
-        </div>
-      </div>
+      
 
       <div className="p-6">
         {/* Distribution Messages */}

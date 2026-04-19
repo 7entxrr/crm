@@ -9,6 +9,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -133,6 +134,8 @@ export default function EmployeesPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [redistributeConfirm, setRedistributeConfirm] = useState(false);
+  const [redistributing, setRedistributing] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -446,6 +449,85 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleRedistributeLeads = async () => {
+    setRedistributing(true);
+    try {
+      // Fetch all active leads (not deleted)
+      const leadsQuery = query(
+        collection(db, "call_numbers"),
+        orderBy("createdAt", "desc"),
+        limit(2000)
+      );
+      
+      const leadsSnapshot = await getDocs(leadsQuery);
+      const leads = leadsSnapshot.docs
+        .map((doc: any) => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter((lead: any) => lead.status !== "deleted");
+      
+      if (leads.length === 0) {
+        alert("No leads found to redistribute.");
+        setRedistributeConfirm(false);
+        setRedistributing(false);
+        return;
+      }
+      
+      // Get all active employees
+      const staffList = staff.map(s => ({ email: s.email.trim().toLowerCase(), name: s.name }));
+      
+      if (staffList.length === 0) {
+        alert("No employees found. Add employees first.");
+        setRedistributeConfirm(false);
+        setRedistributing(false);
+        return;
+      }
+      
+      // Calculate current counts
+      const counts = new Map<string, number>();
+      for (const s of staffList) counts.set(s.email, 0);
+      
+      // Reassign leads
+      for (const lead of leads as any[]) {
+        const assignee = pickAssignee(staffList, counts);
+        if (assignee) {
+          await updateDoc(doc(db, "call_numbers", lead.id), {
+            assignedToEmail: assignee.email,
+            assignedToName: assignee.name,
+            assignedAt: serverTimestamp(),
+          });
+          counts.set(assignee.email, (counts.get(assignee.email) ?? 0) + 1);
+        }
+      }
+      
+      alert(`Successfully redistributed ${leads.length} leads among ${staffList.length} employees.`);
+      setRedistributeConfirm(false);
+    } catch (err) {
+      console.error("Failed to redistribute leads:", err);
+      alert("Failed to redistribute leads. Please try again.");
+    } finally {
+      setRedistributing(false);
+    }
+  };
+
+  function pickAssignee(
+    staff: { email: string; name: string }[],
+    countsByEmail: Map<string, number>,
+  ) {
+    const ordered = [...staff].sort((a, b) => a.email.localeCompare(b.email));
+    let best = ordered[0] ?? null;
+    let bestCount = best ? countsByEmail.get(best.email) ?? 0 : Number.POSITIVE_INFINITY;
+    for (const s of ordered) {
+      const c = countsByEmail.get(s.email) ?? 0;
+      if (c < bestCount) {
+        best = s;
+        bestCount = c;
+      }
+    }
+    return best;
+  }
+
   const handleExcelUpload = async () => {
     if (!excelFile) {
       setUploadError("Please select an Excel file");
@@ -531,6 +613,14 @@ export default function EmployeesPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-purple-200 bg-purple-50 px-4 text-sm font-semibold text-purple-700 shadow-sm transition-colors hover:bg-purple-100 focus:outline-none focus:ring-4 focus:ring-purple-200"
+            type="button"
+            onClick={() => setRedistributeConfirm(true)}
+          >
+            <Users size={16} className="mr-2" />
+            Redistribute Leads
+          </button>
           <button
             className="inline-flex h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 focus:outline-none focus:ring-4 focus:ring-emerald-200"
             type="button"
@@ -1201,6 +1291,51 @@ export default function EmployeesPage() {
                   onClick={handleBulkDelete}
                 >
                   Delete All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {redistributeConfirm ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => !redistributing && setRedistributeConfirm(false)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-purple-500/10 text-purple-600">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Redistribute Leads</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    This will reassign all leads equally among employees.
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-700 mb-6">
+                Are you sure you want to redistribute all leads? This will reassign all active leads equally among all employees, overriding current assignments.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  onClick={() => !redistributing && setRedistributeConfirm(false)}
+                  disabled={redistributing}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-purple-500 px-4 text-sm font-semibold text-white shadow-sm shadow-purple-500/25 transition-colors hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  onClick={handleRedistributeLeads}
+                  disabled={redistributing}
+                >
+                  {redistributing ? "Redistributing..." : "Redistribute"}
                 </button>
               </div>
             </div>

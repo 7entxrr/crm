@@ -284,8 +284,15 @@ export default function LeadsPage() {
   const [excelUploading, setExcelUploading] = useState(false);
   const [excelError, setExcelError] = useState<string | null>(null);
   const [excelResults, setExcelResults] = useState<{ success: number; failed: number; errors: string[] }>({ success: 0, failed: 0, errors: [] });
+  const [uploadAssignmentMode, setUploadAssignmentMode] = useState<"auto" | "specific">("auto");
+  const [uploadSelectedEmployees, setUploadSelectedEmployees] = useState<string[]>([]);
+  const [addLeadAssignmentMode, setAddLeadAssignmentMode] = useState<"auto" | "specific">("auto");
+  const [addLeadSelectedEmployee, setAddLeadSelectedEmployee] = useState<string>("");
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [selectedEmployeeForAllocation, setSelectedEmployeeForAllocation] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(50);
   const [waMenu, setWaMenu] = useState<{
     lead: LeadRow;
     x: number;
@@ -456,6 +463,18 @@ export default function LeadsPage() {
     });
   }, [leads, search, staffEmailFilter, sourceFilter]);
 
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginatedLeads = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filtered.slice(startIndex, endIndex);
+  }, [filtered, currentPage, itemsPerPage]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, staffEmailFilter, sourceFilter]);
+
   const totalLeads = leads.length;
 
   const countsByStaff = useMemo(() => {
@@ -541,7 +560,7 @@ export default function LeadsPage() {
     return nonZero.map((i) => ({ value: i.value, color: i.color, label: i.source }));
   }, [sourceChartItems]);
 
-  async function addOneLead(payload: { name: string; number: string; location?: string; details?: string; source?: string }) {
+  async function addOneLead(payload: { name: string; number: string; location?: string; details?: string; source?: string; specificEmployee?: { email: string; name: string } }) {
     const staffList = staffOptions.map((s) => ({ email: s.email, name: s.name }));
     if (!staffList.length) throw new Error("No employees found. Add employees first.");
 
@@ -551,9 +570,14 @@ export default function LeadsPage() {
     const existing = new Set(leads.map((l) => l.normalizedNumber || normalizePhone(l.number)));
     if (existing.has(normalized)) throw new Error("This phone number already exists.");
 
-    const counts = new Map<string, number>();
-    for (const s of staffList) counts.set(s.email, countsByStaff.get(s.email) ?? 0);
-    const assignee = pickAssignee(staffList, counts);
+    let assignee: { email: string; name: string } | null = payload.specificEmployee || null;
+    
+    if (!assignee) {
+      const counts = new Map<string, number>();
+      for (const s of staffList) counts.set(s.email, countsByStaff.get(s.email) ?? 0);
+      assignee = pickAssignee(staffList, counts);
+    }
+    
     if (!assignee) throw new Error("No employees found. Add employees first.");
 
     await addDoc(collection(db, "call_numbers"), {
@@ -621,6 +645,11 @@ export default function LeadsPage() {
       setExcelError("Please select an Excel file");
       return;
     }
+
+    if (uploadAssignmentMode === "specific" && uploadSelectedEmployees.length === 0) {
+      setExcelError("Please select at least one employee for assignment");
+      return;
+    }
     
     setExcelUploading(true);
     setExcelError(null);
@@ -642,6 +671,12 @@ export default function LeadsPage() {
       const existing = new Set(leads.map((l) => l.normalizedNumber || normalizePhone(l.number)));
       const counts = new Map<string, number>();
       for (const s of staffList) counts.set(s.email, countsByStaff.get(s.email) ?? 0);
+
+      // If specific employee mode, use selected employees for leads
+      let specificAssignees: { email: string; name: string }[] = [];
+      if (uploadAssignmentMode === "specific" && uploadSelectedEmployees.length > 0) {
+        specificAssignees = staffList.filter(s => uploadSelectedEmployees.includes(s.email));
+      }
       
       let successCount = 0;
       let failedCount = 0;
@@ -723,7 +758,14 @@ export default function LeadsPage() {
             continue;
           }
           
-          const assignee = pickAssignee(staffList, counts);
+          // Pick assignee from specific employees or auto-assign
+          let assignee: { email: string; name: string } | null = null;
+          if (specificAssignees.length > 0) {
+            assignee = pickAssignee(specificAssignees, counts);
+          } else {
+            assignee = pickAssignee(staffList, counts);
+          }
+          
           if (!assignee) {
             failedCount++;
             errors.push(`No assignee available for ${clientName}`);
@@ -755,6 +797,8 @@ export default function LeadsPage() {
       
       setExcelResults({ success: successCount, failed: failedCount, errors });
       setExcelFile(null);
+      setUploadSelectedEmployees([]);
+      setUploadAssignmentMode("auto");
       
       if (successCount > 0) {
         setTimeout(() => {
@@ -802,6 +846,35 @@ export default function LeadsPage() {
       setBulkDeleteConfirm(false);
     } catch (err) {
       console.error("Failed to delete leads:", err);
+    }
+  };
+
+  const handleAllocateLeads = async () => {
+    if (!selectedEmployeeForAllocation) {
+      setError("Please select an employee to allocate leads to.");
+      return;
+    }
+
+    const selectedEmployee = staffOptions.find(s => s.email === selectedEmployeeForAllocation);
+    if (!selectedEmployee) {
+      setError("Selected employee not found.");
+      return;
+    }
+
+    try {
+      for (const leadId of selectedLeads) {
+        await updateDoc(doc(db, "call_numbers", leadId), {
+          assignedToEmail: selectedEmployee.email,
+          assignedToName: selectedEmployee.name,
+          assignedAt: serverTimestamp(),
+        });
+      }
+      setSelectedLeads(new Set());
+      setSelectedEmployeeForAllocation("");
+      setError(null);
+    } catch (err) {
+      console.error("Failed to allocate leads:", err);
+      setError("Failed to allocate leads. Please try again.");
     }
   };
 
@@ -956,13 +1029,35 @@ export default function LeadsPage() {
             </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {selectedLeads.size > 0 && (
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
-                type="button"
-                onClick={() => setBulkDeleteConfirm(true)}
-              >
-                <Trash2 size={16} /> Delete Selected ({selectedLeads.size})
-              </button>
+              <>
+                <select
+                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-700 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={selectedEmployeeForAllocation}
+                  onChange={(e) => setSelectedEmployeeForAllocation(e.target.value)}
+                >
+                  <option value="">Select Employee...</option>
+                  {staffOptions.map((s) => (
+                    <option key={s.email} value={s.email}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white shadow-sm shadow-emerald-500/25 transition-colors hover:bg-emerald-600"
+                  type="button"
+                  onClick={handleAllocateLeads}
+                  disabled={!selectedEmployeeForAllocation}
+                >
+                  <Check size={16} /> Allocate ({selectedLeads.size})
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                  type="button"
+                  onClick={() => setBulkDeleteConfirm(true)}
+                >
+                  <Trash2 size={16} /> Delete Selected ({selectedLeads.size})
+                </button>
+              </>
             )}
               <select
                 className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-700 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
@@ -1007,7 +1102,7 @@ export default function LeadsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.slice(0, 50).map((l) => (
+                {paginatedLeads.map((l) => (
                   <tr key={l.id} className="hover:bg-slate-50/70">
                     <td className="px-6 py-4">
                       <input
@@ -1095,9 +1190,32 @@ export default function LeadsPage() {
             </table>
           </div>
 
-          {!loading && filtered.length > 50 ? (
-            <div className="border-t border-slate-100 px-6 py-3 text-xs font-semibold text-slate-500">
-              Showing 50 of {filtered.length} records (use search/filters to narrow).
+          {!loading && filtered.length > 0 ? (
+            <div className="border-t border-slate-100 px-6 py-3 flex items-center justify-between">
+              <div className="text-xs font-semibold text-slate-500">
+                Showing {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, filtered.length)} of {filtered.length} records
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </button>
+                <span className="text-xs font-semibold text-slate-700">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           ) : null}
         </Card>
@@ -1339,18 +1457,29 @@ export default function LeadsPage() {
                 setError(null);
                 setSaving(true);
                 try {
-                  await addOneLead({ 
-                    name: leadName, 
+                  let specificEmployee: { email: string; name: string } | undefined;
+                  if (addLeadAssignmentMode === "specific" && addLeadSelectedEmployee) {
+                    const employee = staffOptions.find(s => s.email === addLeadSelectedEmployee);
+                    if (employee) {
+                      specificEmployee = { email: employee.email, name: employee.name };
+                    }
+                  }
+                  
+                  await addOneLead({
+                    name: leadName,
                     number: leadNumber,
                     location: leadLocation,
                     details: leadDetails,
-                    source: leadSource
+                    source: leadSource,
+                    specificEmployee
                   });
                   setLeadName("");
                   setLeadNumber("");
                   setLeadLocation("");
                   setLeadDetails("");
                   setLeadSource("");
+                  setAddLeadSelectedEmployee("");
+                  setAddLeadAssignmentMode("auto");
                   setOpenAdd(false);
                 } catch (err) {
                   const message =
@@ -1361,6 +1490,52 @@ export default function LeadsPage() {
                 }
               }}
             >
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Assignment Mode
+                </div>
+                <div className="mt-2 flex gap-3">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                      addLeadAssignmentMode === "auto"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    onClick={() => setAddLeadAssignmentMode("auto")}
+                  >
+                    Auto-assign
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                      addLeadAssignmentMode === "specific"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    onClick={() => setAddLeadAssignmentMode("specific")}
+                  >
+                    Assign to Employee
+                  </button>
+                </div>
+                {addLeadAssignmentMode === "specific" && (
+                  <div className="mt-3">
+                    <select
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-700 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                      value={addLeadSelectedEmployee}
+                      onChange={(e) => setAddLeadSelectedEmployee(e.target.value)}
+                    >
+                      <option value="">Select Employee...</option>
+                      {staffOptions.map((s) => (
+                        <option key={s.email} value={s.email}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Name
@@ -1504,6 +1679,60 @@ export default function LeadsPage() {
             </div>
 
             <div className="space-y-5 p-6">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Assignment Mode
+                </div>
+                <div className="mt-2 flex gap-3">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                      uploadAssignmentMode === "auto"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    onClick={() => setUploadAssignmentMode("auto")}
+                  >
+                    Auto-assign to All
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                      uploadAssignmentMode === "specific"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    onClick={() => setUploadAssignmentMode("specific")}
+                  >
+                    Assign to Specific Employee
+                  </button>
+                </div>
+                {uploadAssignmentMode === "specific" && (
+                  <div className="mt-3 space-y-2 max-h-48 overflow-auto">
+                    {staffOptions.map((s) => (
+                      <label
+                        key={s.email}
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          checked={uploadSelectedEmployees.includes(s.email)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setUploadSelectedEmployees([...uploadSelectedEmployees, s.email]);
+                            } else {
+                              setUploadSelectedEmployees(uploadSelectedEmployees.filter(email => email !== s.email));
+                            }
+                          }}
+                        />
+                        <span className="text-sm font-semibold text-slate-700">{s.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Excel File
