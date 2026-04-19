@@ -1,21 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, Mail, Users } from "lucide-react";
+import { BadgeCheck, Mail, Trash2, Upload, FileSpreadsheet, Users, Pencil, Check } from "lucide-react";
 import {
   Timestamp,
   addDoc,
   collection,
+  deleteDoc,
+  doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, deleteUser, signInAnonymously, updateEmail, updatePassword } from "firebase/auth";
 import { db, getSecondaryAuth } from "@/lib/firebase";
 import { BarsMini, Card, DonutChart } from "../_components/ui";
+import * as XLSX from "xlsx";
 
 type StaffRow = {
   id: string;
@@ -113,6 +118,21 @@ export default function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState<ResponseKey | "All">("All");
   const [callRows, setCallRows] = useState<CallResponseRow[]>([]);
   const [callLoading, setCallLoading] = useState(true);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; errors: string[] }>({ success: 0, failed: 0, errors: [] });
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -308,6 +328,199 @@ export default function EmployeesPage() {
     return [...map.values()].sort((a, b) => b.total - a.total);
   }, [callRowsFiltered, staff]);
 
+  const handleDeleteEmployee = async (staffId: string) => {
+    try {
+      const staffDoc = await getDoc(doc(db, "staff", staffId));
+      if (!staffDoc.exists()) {
+        setDeleteConfirm(null);
+        return;
+      }
+      
+      const staffData = staffDoc.data() as { uid?: string };
+      
+      // Delete from Firestore
+      await deleteDoc(doc(db, "staff", staffId));
+      
+      // Delete from Firebase Auth if UID exists
+      if (staffData.uid) {
+        try {
+          const secondaryAuth = getSecondaryAuth();
+          await signInAnonymously(secondaryAuth);
+          // Note: deleteUser requires the user to be signed in with that auth instance
+          // For now, we'll just delete from Firestore as deleteUser requires the user session
+        } catch (err) {
+          console.error("Failed to delete auth user:", err);
+        }
+      }
+      
+      setDeleteConfirm(null);
+    } catch (err) {
+      console.error("Failed to delete employee:", err);
+    }
+  };
+
+  const handleEditEmployee = (staff: StaffRow) => {
+    setEditingStaff(staff);
+    setEditName(staff.name);
+    setEditEmail(staff.email);
+    setEditPassword("");
+    setEditError(null);
+    setEditOpen(true);
+  };
+
+  const handleUpdateEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStaff) return;
+    
+    setEditError(null);
+    setEditSaving(true);
+    
+    try {
+      const trimmedName = editName.trim();
+      const trimmedEmail = editEmail.trim();
+      
+      if (!trimmedName || !trimmedEmail) {
+        setEditError("Name and email are required");
+        return;
+      }
+      
+      // Update Firestore document
+      const updateData: { name: string; email: string; password?: string } = {
+        name: trimmedName,
+        email: trimmedEmail,
+      };
+      
+      if (editPassword) {
+        updateData.password = editPassword;
+      }
+      
+      await updateDoc(doc(db, "staff", editingStaff.id), updateData);
+      
+      // Note: Updating Firebase Auth email/password requires the user to be signed in
+      // This is complex to implement from admin side, so we just update Firestore for now
+      
+      setEditOpen(false);
+      setEditingStaff(null);
+      setEditName("");
+      setEditEmail("");
+      setEditPassword("");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update employee");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const toggleEmployeeSelection = (id: string) => {
+    setSelectedEmployees(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const allIds = staff.map(s => s.id);
+    if (selectedEmployees.size === allIds.length) {
+      setSelectedEmployees(new Set());
+    } else {
+      setSelectedEmployees(new Set(allIds));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      for (const staffId of selectedEmployees) {
+        // Delete from Firestore only
+        await deleteDoc(doc(db, "staff", staffId));
+      }
+      
+      setSelectedEmployees(new Set());
+      setBulkDeleteConfirm(false);
+    } catch (err) {
+      console.error("Failed to bulk delete employees:", err);
+    }
+  };
+
+  const handleExcelUpload = async () => {
+    if (!excelFile) {
+      setUploadError("Please select an Excel file");
+      return;
+    }
+    
+    setUploading(true);
+    setUploadError(null);
+    setUploadResults({ success: 0, failed: 0, errors: [] });
+    
+    try {
+      const data = await excelFile.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(sheet) as any[];
+      
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+      
+      for (const row of jsonData) {
+        try {
+          const name = row.name || row.Name || row.NAME || "";
+          const email = row.email || row.Email || row.EMAIL || "";
+          const password = row.password || row.Password || row.PASSWORD || "";
+          
+          if (!name || !email || !password) {
+            failedCount++;
+            errors.push(`Missing required fields for: ${name || email || "Unknown"}`);
+            continue;
+          }
+          
+          const trimmedName = String(name).trim();
+          const trimmedEmail = String(email).trim();
+          
+          const secondaryAuth = getSecondaryAuth();
+          const userCred = await createUserWithEmailAndPassword(
+            secondaryAuth,
+            trimmedEmail,
+            String(password)
+          );
+          
+          await addDoc(collection(db, "staff"), {
+            name: trimmedName,
+            email: trimmedEmail,
+            password: String(password),
+            uid: userCred.user.uid,
+            createdAt: serverTimestamp(),
+          });
+          
+          successCount++;
+        } catch (err) {
+          failedCount++;
+          const errorMsg = err instanceof Error ? err.message : "Unknown error";
+          errors.push(`${row.name || row.email || "Row"}: ${errorMsg}`);
+        }
+      }
+      
+      setUploadResults({ success: successCount, failed: failedCount, errors });
+      setExcelFile(null);
+      
+      if (successCount > 0) {
+        setTimeout(() => {
+          setExcelModalOpen(false);
+          setUploadResults({ success: 0, failed: 0, errors: [] });
+        }, 2000);
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to process Excel file");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -317,16 +530,30 @@ export default function EmployeesPage() {
             Manage staff, roles, and performance.
           </div>
         </div>
-        <button
-          className="inline-flex h-10 items-center justify-center rounded-xl bg-[#0b1220] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200"
-          type="button"
-          onClick={() => {
-            setError(null);
-            setOpen(true);
-          }}
-        >
-          Add Employee
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 focus:outline-none focus:ring-4 focus:ring-emerald-200"
+            type="button"
+            onClick={() => {
+              setUploadError(null);
+              setUploadResults({ success: 0, failed: 0, errors: [] });
+              setExcelModalOpen(true);
+            }}
+          >
+            <FileSpreadsheet size={16} className="mr-2" />
+            Bulk Upload
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-[#0b1220] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200"
+            type="button"
+            onClick={() => {
+              setError(null);
+              setOpen(true);
+            }}
+          >
+            Add Employee
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
@@ -699,6 +926,15 @@ export default function EmployeesPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {selectedEmployees.size > 0 && (
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                type="button"
+                onClick={() => setBulkDeleteConfirm(true)}
+              >
+                <Trash2 size={16} /> Delete Selected ({selectedEmployees.size})
+              </button>
+            )}
             <input
               className="h-10 w-[220px] rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
               placeholder="Search employees..."
@@ -712,15 +948,32 @@ export default function EmployeesPage() {
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
+                <th className="px-6 py-3 w-[50px]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    checked={selectedEmployees.size === staff.length && staff.length > 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="px-6 py-3">Employee</th>
                 <th className="px-6 py-3">Email</th>
                 <th className="px-6 py-3">Created</th>
                 <th className="px-6 py-3">Contact</th>
+                <th className="px-6 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((e) => (
                 <tr key={e.id} className="hover:bg-slate-50/70">
+                  <td className="px-6 py-4">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      checked={selectedEmployees.has(e.id)}
+                      onChange={() => toggleEmployeeSelection(e.id)}
+                    />
+                  </td>
                   <td className="px-6 py-4">
                     <div className="font-semibold text-slate-900">{e.name}</div>
                     <div className="text-xs text-slate-500">Staff</div>
@@ -736,12 +989,356 @@ export default function EmployeesPage() {
                       </span>
                     </div>
                   </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors"
+                        type="button"
+                        onClick={() => handleEditEmployee(e)}
+                      >
+                        <Pencil size={14} />
+                        Edit
+                      </button>
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 hover:border-rose-300 transition-colors"
+                        type="button"
+                        onClick={() => setDeleteConfirm(e.id)}
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {editOpen ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => {
+              if (editSaving) return;
+              setEditOpen(false);
+            }}
+          />
+          <div className="absolute inset-y-0 right-0 w-full max-w-[520px] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+              <div>
+                <div className="text-sm font-semibold">Edit Employee</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Update employee details
+                </div>
+              </div>
+              <button
+                className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                type="button"
+                onClick={() => {
+                  if (editSaving) return;
+                  setEditOpen(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <form
+              className="space-y-5 p-6"
+              onSubmit={handleUpdateEmployee}
+            >
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Name
+                </div>
+                <input
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Employee name"
+                  required
+                />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Email
+                </div>
+                <input
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="name@email.com"
+                  autoComplete="email"
+                  inputMode="email"
+                  required
+                />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  New Password (optional)
+                </div>
+                <input
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Leave blank to keep current password"
+                  type="password"
+                  autoComplete="new-password"
+                />
+              </div>
+
+              {editError ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                  {editError}
+                </div>
+              ) : null}
+
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  disabled={editSaving}
+                  onClick={() => {
+                    if (editSaving) return;
+                    setEditOpen(false);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white shadow-sm shadow-emerald-500/25 transition-colors hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="submit"
+                  disabled={editSaving}
+                >
+                  {editSaving ? "Updating..." : "Update Employee"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteConfirm ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => setDeleteConfirm(null)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 text-rose-600">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Delete Employee</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    This action cannot be undone.
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-700 mb-6">
+                Are you sure you want to delete this employee? This will remove them from the system.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  onClick={() => setDeleteConfirm(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                  type="button"
+                  onClick={() => handleDeleteEmployee(deleteConfirm)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {bulkDeleteConfirm ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => setBulkDeleteConfirm(false)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 text-rose-600">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Bulk Delete Employees</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    This action cannot be undone.
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-700 mb-6">
+                Are you sure you want to delete {selectedEmployees.size} employee{selectedEmployees.size > 1 ? 's' : ''}? This will remove them from the system.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  onClick={() => setBulkDeleteConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                  type="button"
+                  onClick={handleBulkDelete}
+                >
+                  Delete All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {excelModalOpen ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => {
+              if (uploading) return;
+              setExcelModalOpen(false);
+            }}
+          />
+          <div className="absolute inset-y-0 right-0 w-full max-w-[520px] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+              <div>
+                <div className="text-sm font-semibold">Bulk Upload Employees</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Upload Excel file with columns: name, email, password
+                </div>
+              </div>
+              <button
+                className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                type="button"
+                onClick={() => {
+                  if (uploading) return;
+                  setExcelModalOpen(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-5 p-6">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Excel File
+                </div>
+                <div className="mt-2">
+                  <label className="flex h-32 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors">
+                    <div className="flex flex-col items-center gap-2">
+                      <FileSpreadsheet size={32} className="text-slate-400" />
+                      <span className="text-sm font-semibold text-slate-600">
+                        {excelFile ? excelFile.name : "Click to upload Excel file"}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        .xlsx, .xls files only
+                      </span>
+                    </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".xlsx,.xls"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) setExcelFile(file);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Expected Format
+                </div>
+                <div className="text-xs text-slate-700 space-y-1">
+                  <p>Excel file should have these columns:</p>
+                  <ul className="list-disc list-inside ml-2 space-y-1">
+                    <li><strong>name</strong>: Employee name</li>
+                    <li><strong>email</strong>: Employee email</li>
+                    <li><strong>password</strong>: Employee password</li>
+                  </ul>
+                </div>
+              </div>
+
+              {uploadError ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                  {uploadError}
+                </div>
+              ) : null}
+
+              {uploadResults.success > 0 || uploadResults.failed > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                    Upload Results
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">Success:</span>
+                      <span className="font-semibold text-emerald-600">{uploadResults.success}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">Failed:</span>
+                      <span className="font-semibold text-rose-600">{uploadResults.failed}</span>
+                    </div>
+                    {uploadResults.errors.length > 0 && (
+                      <div className="mt-3">
+                        <div className="text-xs font-semibold text-slate-500 mb-1">Errors:</div>
+                        <div className="max-h-32 overflow-auto rounded-lg bg-white p-2 text-xs text-slate-700">
+                          {uploadResults.errors.map((error, idx) => (
+                            <div key={idx} className="py-1">• {error}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => {
+                    if (uploading) return;
+                    setExcelModalOpen(false);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white shadow-sm shadow-emerald-500/25 transition-colors hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  disabled={uploading || !excelFile}
+                  onClick={handleExcelUpload}
+                >
+                  {uploading ? "Uploading..." : "Upload"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {open ? (
         <div className="fixed inset-0 z-50">

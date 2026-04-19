@@ -51,14 +51,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <div className="flex min-h-screen">
         <aside className="hidden w-[264px] shrink-0 flex-col bg-[#0b1220] text-slate-200 lg:flex">
           <div className="flex h-16 items-center gap-2 px-6">
-            <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-500/15">
-                <LogoMark />
-              </div>
-              <div className="text-sm font-semibold tracking-wide">
-                Clear Lands
-              </div>
-            </div>
+            <img src="/src/logo.png" alt="Clear Lands" className="h-8 w-auto" />
           </div>
           <Sidebar sections={sidebarSections} />
         </aside>

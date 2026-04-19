@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, UserPlus, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Upload, UserPlus, Users, FileSpreadsheet, Trash2, Check } from "lucide-react";
 import {
   addDoc, 
   collection,
+  deleteDoc,
+  doc,
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, DonutChart } from "../_components/ui";
+import * as XLSX from "xlsx";
 
 type StaffRow = {
   id: string;
@@ -30,6 +35,11 @@ type LeadRow = {
   assignedToEmail: string;
   createdAt: Date | null;
   assignedAt: Date | null;
+  location?: string;
+  details?: string;
+  source?: string;
+  status?: string;
+  deletedAt?: Date | null;
 };
 
 function normalizePhone(raw: string) {
@@ -138,14 +148,90 @@ function WhatsAppIcon({ size }: { size: number }) {
   );
 }
 
+function normalizeSourceName(source: string | undefined): string {
+  if (!source) return "";
+  const sourceLower = source.toLowerCase().trim();
+  
+  // Check for 99acres variations first
+  if (sourceLower.includes("99") || sourceLower.includes("99acres") || sourceLower.includes("99 acres") || sourceLower.includes("99acre")) {
+    return "99acres";
+  }
+  
+  // Check for MagicBricks variations
+  if (sourceLower === "mb" || sourceLower.includes("magicbricks") || sourceLower.includes("magic bricks") || sourceLower.includes("magicbrick")) {
+    return "MagicBricks";
+  }
+  
+  // Check for OLX
+  if (sourceLower.includes("olx")) {
+    return "OLX";
+  }
+  
+  // Check for other sources
+  if (sourceLower.includes("housing") || sourceLower.includes("housing.com")) {
+    return "Housing.com";
+  }
+  if (sourceLower.includes("commonfloor") || sourceLower.includes("common floor")) {
+    return "CommonFloor";
+  }
+  if (sourceLower.includes("proptiger") || sourceLower.includes("prop tiger")) {
+    return "PropTiger";
+  }
+  if (sourceLower.includes("facebook") || sourceLower.includes("fb")) {
+    return "Facebook";
+  }
+  if (sourceLower.includes("instagram") || sourceLower.includes("insta")) {
+    return "Instagram";
+  }
+  if (sourceLower.includes("whatsapp") || sourceLower.includes("wa")) {
+    return "WhatsApp";
+  }
+  if (sourceLower.includes("google")) {
+    return "Google";
+  }
+  if (sourceLower.includes("justdial")) {
+    return "Justdial";
+  }
+  if (sourceLower.includes("sulekha")) {
+    return "Sulekha";
+  }
+  if (sourceLower.includes("quikr")) {
+    return "Quikr";
+  }
+  if (sourceLower.includes("direct") || sourceLower.includes("referral")) {
+    return "Direct/Referral";
+  }
+  if (sourceLower.includes("website") || sourceLower.includes("web")) {
+    return "Website";
+  }
+  if (sourceLower.includes("cold call")) {
+    return "Cold Call";
+  }
+  if (sourceLower.includes("walk") || sourceLower.includes("walk-in")) {
+    return "Walk-in";
+  }
+  if (sourceLower.includes("exhibition") || sourceLower.includes("expo")) {
+    return "Exhibition";
+  }
+  
+  // If no match, return original
+  return source;
+}
+
 function parseLeadLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return null;
   const csv = trimmed.split(",").map((s) => s.trim()).filter(Boolean);
-  if (csv.length >= 2) return { name: csv.slice(0, -1).join(", ").trim(), number: csv[csv.length - 1] ?? "" };
+  if (csv.length >= 2) {
+    // Last item is always the number, second to last could be source, rest is name
+    const number = csv[csv.length - 1] ?? "";
+    const source = csv.length >= 3 ? csv[csv.length - 2] ?? "" : "";
+    const name = csv.slice(0, csv.length - (source ? 2 : 1)).join(", ").trim();
+    return { name, number, source };
+  }
   const match = trimmed.match(/^(.*?)(?:\s*[-–—:]\s*|\s+)(\+?\d[\d\s().-]{6,})$/);
-  if (match) return { name: (match[1] ?? "").trim(), number: (match[2] ?? "").trim() };
-  return { name: "", number: trimmed };
+  if (match) return { name: (match[1] ?? "").trim(), number: (match[2] ?? "").trim(), source: "" };
+  return { name: "", number: trimmed, source: "" };
 }
 
 function pickAssignee(
@@ -166,18 +252,23 @@ function pickAssignee(
 }
 
 export default function LeadsPage() {
+  const router = useRouter();
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
   const [staffEmailFilter, setStaffEmailFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
 
   const [openAdd, setOpenAdd] = useState(false);
   const [openUpload, setOpenUpload] = useState(false);
 
   const [leadName, setLeadName] = useState("");
   const [leadNumber, setLeadNumber] = useState("");
+  const [leadLocation, setLeadLocation] = useState("");
+  const [leadDetails, setLeadDetails] = useState("");
+  const [leadSource, setLeadSource] = useState("");
 
   const [uploadText, setUploadText] = useState("");
   const [fileError, setFileError] = useState<string | null>(null);
@@ -189,6 +280,12 @@ export default function LeadsPage() {
     skipped: number;
     invalid: number;
   } | null>(null);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelUploading, setExcelUploading] = useState(false);
+  const [excelError, setExcelError] = useState<string | null>(null);
+  const [excelResults, setExcelResults] = useState<{ success: number; failed: number; errors: string[] }>({ success: 0, failed: 0, errors: [] });
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [waMenu, setWaMenu] = useState<{
     lead: LeadRow;
     x: number;
@@ -290,6 +387,11 @@ export default function LeadsPage() {
             assignedToEmail?: string;
             createdAt?: { toDate?: () => Date } | null;
             assignedAt?: { toDate?: () => Date } | null;
+            location?: string;
+            details?: string;
+            source?: string;
+            status?: string;
+            deletedAt?: { toDate?: () => Date } | null;
           };
           return {
             id: d.id,
@@ -300,6 +402,11 @@ export default function LeadsPage() {
             assignedToEmail: String(data.assignedToEmail ?? "").trim().toLowerCase(),
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
             assignedAt: data.assignedAt?.toDate ? data.assignedAt.toDate() : null,
+            location: data.location ?? "",
+            details: data.details ?? "",
+            source: data.source ?? "",
+            status: data.status ?? "",
+            deletedAt: data.deletedAt?.toDate ? data.deletedAt.toDate() : null,
           };
         });
         setLeads(rows);
@@ -327,17 +434,27 @@ export default function LeadsPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter((l) => {
+      // Exclude deleted leads from main view
+      if (l.status === "deleted") return false;
+
       if (staffEmailFilter !== "all" && l.assignedToEmail !== staffEmailFilter) return false;
+      if (sourceFilter !== "all") {
+        const normalizedSource = normalizeSourceName(l.source);
+        if (!normalizedSource || normalizedSource !== sourceFilter) return false;
+      }
       if (!q) return true;
       return (
         l.name.toLowerCase().includes(q) ||
         l.number.toLowerCase().includes(q) ||
         l.normalizedNumber.toLowerCase().includes(q) ||
         l.assignedToName.toLowerCase().includes(q) ||
-        l.assignedToEmail.toLowerCase().includes(q)
+        l.assignedToEmail.toLowerCase().includes(q) ||
+        (l.location && l.location.toLowerCase().includes(q)) ||
+        (l.details && l.details.toLowerCase().includes(q)) ||
+        (l.source && l.source.toLowerCase().includes(q))
       );
     });
-  }, [leads, search, staffEmailFilter]);
+  }, [leads, search, staffEmailFilter, sourceFilter]);
 
   const totalLeads = leads.length;
 
@@ -346,6 +463,15 @@ export default function LeadsPage() {
     for (const l of leads) {
       const email = l.assignedToEmail || "unassigned";
       map.set(email, (map.get(email) ?? 0) + 1);
+    }
+    return map;
+  }, [leads]);
+
+  const countsBySource = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of leads) {
+      const source = normalizeSourceName(l.source) || "Unknown";
+      map.set(source, (map.get(source) ?? 0) + 1);
     }
     return map;
   }, [leads]);
@@ -386,7 +512,36 @@ export default function LeadsPage() {
     return rows.slice(0, 8);
   }, [staffChartItems]);
 
-  async function addOneLead(payload: { name: string; number: string }) {
+  const sourceChartItems = useMemo(() => {
+    const colors = [
+      "rgba(16,185,129,0.95)",
+      "rgba(59,130,246,0.95)",
+      "rgba(245,158,11,0.95)",
+      "rgba(139,92,246,0.95)",
+      "rgba(244,63,94,0.9)",
+      "rgba(15,23,42,0.75)",
+      "rgba(236,72,153,0.9)",
+      "rgba(20,184,166,0.9)",
+    ];
+
+    return Array.from(countsBySource.entries()).map(([source, count], i) => {
+      const color = colors[i % colors.length]!;
+      return {
+        source,
+        value: count,
+        color,
+      };
+    });
+  }, [countsBySource]);
+
+  const sourceDonutSegments = useMemo(() => {
+    const nonZero = sourceChartItems.filter((i) => i.value > 0);
+    if (!nonZero.length)
+      return [{ value: 1, color: "rgba(148,163,184,0.25)", label: "No Data" }];
+    return nonZero.map((i) => ({ value: i.value, color: i.color, label: i.source }));
+  }, [sourceChartItems]);
+
+  async function addOneLead(payload: { name: string; number: string; location?: string; details?: string; source?: string }) {
     const staffList = staffOptions.map((s) => ({ email: s.email, name: s.name }));
     if (!staffList.length) throw new Error("No employees found. Add employees first.");
 
@@ -405,6 +560,9 @@ export default function LeadsPage() {
       name: payload.name.trim(),
       number: normalized,
       normalizedNumber: normalized,
+      location: payload.location?.trim() || "",
+      details: payload.details?.trim() || "",
+      source: payload.source?.trim() || "",
       assignedToEmail: assignee.email,
       assignedToName: assignee.name,
       assignedAt: serverTimestamp(),
@@ -443,6 +601,7 @@ export default function LeadsPage() {
         name: parsed.name.trim(),
         number: normalized,
         normalizedNumber: normalized,
+        source: parsed.source?.trim() || "",
         assignedToEmail: assignee.email,
         assignedToName: assignee.name,
         assignedAt: serverTimestamp(),
@@ -456,6 +615,195 @@ export default function LeadsPage() {
 
     setUploadResult({ added, skipped, invalid });
   }
+
+  async function handleExcelUpload() {
+    if (!excelFile) {
+      setExcelError("Please select an Excel file");
+      return;
+    }
+    
+    setExcelUploading(true);
+    setExcelError(null);
+    setExcelResults({ success: 0, failed: 0, errors: [] });
+    
+    try {
+      const data = await excelFile.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(sheet) as any[];
+      
+      const staffList = staffOptions.map((s) => ({ email: s.email, name: s.name }));
+      if (!staffList.length) {
+        setExcelError("No employees found. Add employees first.");
+        return;
+      }
+      
+      const existing = new Set(leads.map((l) => l.normalizedNumber || normalizePhone(l.number)));
+      const counts = new Map<string, number>();
+      for (const s of staffList) counts.set(s.email, countsByStaff.get(s.email) ?? 0);
+      
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+      
+      for (const row of jsonData) {
+        try {
+          // Handle various column name formats
+          const clientName = row["Client Name"] || row["client name"] || row["ClientName"] || row["name"] || row["Name"] || "";
+          const mobNo = row["Mob No"] || row["mob no"] || row["MobNo"] || row["number"] || row["Number"] || row["phone"] || row["Phone"] || "";
+          const location = row["Location"] || row["location"] || "";
+          const details = row["Deta"] || row["Details"] || row["details"] || row["Detail"] || row["detail"] || "";
+          
+          // Find source column by checking all keys for case-insensitive match, or use column E (5th column)
+          const sourceKey = Object.keys(row).find(key => key.toLowerCase().includes("source"));
+          const values = Object.values(row);
+          let source = sourceKey ? String(row[sourceKey] || "").trim() : (values[4] ? String(values[4]).trim() : "");
+          
+          // Normalize source names
+          if (source) {
+            const sourceLower = source.toLowerCase();
+            if (sourceLower.includes("99") || sourceLower.includes("99acres") || sourceLower.includes("99 acres")) {
+              source = "99acres";
+            } else if (sourceLower === "mb" || sourceLower === "magicbricks" || sourceLower === "magic bricks") {
+              source = "MagicBricks";
+            } else if (sourceLower === "olx") {
+              source = "OLX";
+            } else if (sourceLower.includes("housing") || sourceLower.includes("housing.com")) {
+              source = "Housing.com";
+            } else if (sourceLower.includes("commonfloor") || sourceLower.includes("common floor")) {
+              source = "CommonFloor";
+            } else if (sourceLower.includes("proptiger") || sourceLower.includes("prop tiger")) {
+              source = "PropTiger";
+            } else if (sourceLower.includes("facebook") || sourceLower.includes("fb")) {
+              source = "Facebook";
+            } else if (sourceLower.includes("instagram") || sourceLower.includes("insta")) {
+              source = "Instagram";
+            } else if (sourceLower.includes("whatsapp") || sourceLower.includes("wa")) {
+              source = "WhatsApp";
+            } else if (sourceLower.includes("google")) {
+              source = "Google";
+            } else if (sourceLower.includes("justdial")) {
+              source = "Justdial";
+            } else if (sourceLower.includes("sulekha")) {
+              source = "Sulekha";
+            } else if (sourceLower.includes("quikr")) {
+              source = "Quikr";
+            } else if (sourceLower.includes("direct") || sourceLower.includes("referral")) {
+              source = "Direct/Referral";
+            } else if (sourceLower.includes("website") || sourceLower.includes("web")) {
+              source = "Website";
+            } else if (sourceLower.includes("cold call") || sourceLower.includes("cold call")) {
+              source = "Cold Call";
+            } else if (sourceLower.includes("walk") || sourceLower.includes("walk-in")) {
+              source = "Walk-in";
+            } else if (sourceLower.includes("exhibition") || sourceLower.includes("expo")) {
+              source = "Exhibition";
+            } else if (sourceLower.includes("other")) {
+              source = "Other";
+            }
+          }
+          
+          if (!clientName || !mobNo) {
+            failedCount++;
+            errors.push(`Missing Client Name or Mob No for row`);
+            continue;
+          }
+          
+          const normalized = normalizePhone(String(mobNo));
+          if (!normalized) {
+            failedCount++;
+            errors.push(`Invalid phone number for ${clientName}`);
+            continue;
+          }
+          
+          if (existing.has(normalized)) {
+            failedCount++;
+            errors.push(`Duplicate phone number for ${clientName}`);
+            continue;
+          }
+          
+          const assignee = pickAssignee(staffList, counts);
+          if (!assignee) {
+            failedCount++;
+            errors.push(`No assignee available for ${clientName}`);
+            continue;
+          }
+          
+          await addDoc(collection(db, "call_numbers"), {
+            name: String(clientName).trim(),
+            number: normalized,
+            normalizedNumber: normalized,
+            location: String(location).trim(),
+            details: String(details).trim(),
+            source: String(source).trim(),
+            assignedToEmail: assignee.email,
+            assignedToName: assignee.name,
+            assignedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+          });
+          
+          existing.add(normalized);
+          counts.set(assignee.email, (counts.get(assignee.email) ?? 0) + 1);
+          successCount++;
+        } catch (err) {
+          failedCount++;
+          const errorMsg = err instanceof Error ? err.message : "Unknown error";
+          errors.push(`Row error: ${errorMsg}`);
+        }
+      }
+      
+      setExcelResults({ success: successCount, failed: failedCount, errors });
+      setExcelFile(null);
+      
+      if (successCount > 0) {
+        setTimeout(() => {
+          setOpenUpload(false);
+          setExcelResults({ success: 0, failed: 0, errors: [] });
+        }, 2000);
+      }
+    } catch (err) {
+      setExcelError(err instanceof Error ? err.message : "Failed to process Excel file");
+    } finally {
+      setExcelUploading(false);
+    }
+  }
+
+  const toggleLeadSelection = (id: string) => {
+    setSelectedLeads(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAllLeads = () => {
+    const allIds = filtered.map(l => l.id);
+    if (selectedLeads.size === allIds.length) {
+      setSelectedLeads(new Set());
+    } else {
+      setSelectedLeads(new Set(allIds));
+    }
+  };
+
+  const handleBulkDeleteLeads = async () => {
+    try {
+      for (const leadId of selectedLeads) {
+        await updateDoc(doc(db, "call_numbers", leadId), {
+          status: "deleted",
+          deletedAt: serverTimestamp(),
+        });
+      }
+      setSelectedLeads(new Set());
+      setBulkDeleteConfirm(false);
+    } catch (err) {
+      console.error("Failed to delete leads:", err);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -487,11 +835,18 @@ export default function LeadsPage() {
           >
             <UserPlus size={16} /> Add Lead
           </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-300 focus:outline-none focus:ring-4 focus:ring-gray-200"
+            type="button"
+            onClick={() => router.push("/recycle-bin")}
+          >
+            <Trash2 size={16} /> Recycle Bin
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
           <div className="p-6">
             <div className="flex items-start justify-between">
               <div>
@@ -538,6 +893,59 @@ export default function LeadsPage() {
           </div>
         </Card>
 
+        <Card>
+          <div className="p-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-sm font-semibold">Source Distribution</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Leads by source
+                </div>
+              </div>
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-purple-500/10 text-purple-700">
+                <Upload size={18} />
+              </div>
+            </div>
+            <div className="mt-5 text-3xl font-semibold text-slate-900">
+              {loading ? "—" : sourceChartItems.reduce((sum, s) => sum + s.value, 0)}
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-6">
+              <DonutChart segments={sourceDonutSegments} />
+              <div className="min-w-0 flex-1 space-y-2 max-h-48 overflow-auto">
+                {sourceChartItems
+                  .sort((a, b) => b.value - a.value)
+                  .slice(0, 8)
+                  .map((s) => (
+                    <button
+                      key={s.source}
+                      type="button"
+                      className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                        sourceFilter === s.source
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : "border-slate-100 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                      onClick={() => setSourceFilter((v) => (v === s.source ? "all" : s.source))}
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: s.color }}
+                        />
+                        <span className="truncate">{s.source || "Unknown"}</span>
+                      </span>
+                      <span className="shrink-0 text-slate-500">{s.value}</span>
+                    </button>
+                  ))}
+                {!loading && !sourceChartItems.length ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                    No sources found.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </Card>
+
         <Card className="lg:col-span-2 overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -546,7 +954,16 @@ export default function LeadsPage() {
                 Search, filter by employee, and verify duplicates by phone number.
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {selectedLeads.size > 0 && (
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                type="button"
+                onClick={() => setBulkDeleteConfirm(true)}
+              >
+                <Trash2 size={16} /> Delete Selected ({selectedLeads.size})
+              </button>
+            )}
               <select
                 className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-700 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                 value={staffEmailFilter}
@@ -568,20 +985,38 @@ export default function LeadsPage() {
             </div>
           </div>
 
-          <div className="overflow-hidden">
-            <table className="w-full table-fixed text-left text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] table-fixed text-left text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-[20%] px-6 py-3">Lead</th>
-                  <th className="w-[20%] px-6 py-3">Number</th>
-                  <th className="w-[26%] px-6 py-3">Assigned</th>
-                  <th className="w-[17%] px-6 py-3">Assigned At</th>
-                  <th className="w-[17%] px-6 py-3">Created At</th>
+                  <th className="px-6 py-3 w-[50px]">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      checked={selectedLeads.size === filtered.length && filtered.length > 0}
+                      onChange={toggleSelectAllLeads}
+                    />
+                  </th>
+                  <th className="w-[14%] px-6 py-3">Lead</th>
+                  <th className="w-[14%] px-6 py-3">Number</th>
+                  <th className="w-[12%] px-6 py-3">Location</th>
+                  <th className="w-[12%] px-6 py-3">Source</th>
+                  <th className="w-[18%] px-6 py-3">Assigned</th>
+                  <th className="w-[10%] px-6 py-3">Assigned At</th>
+                  <th className="w-[10%] px-6 py-3">Created At</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.slice(0, 50).map((l) => (
                   <tr key={l.id} className="hover:bg-slate-50/70">
+                    <td className="px-6 py-4">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        checked={selectedLeads.has(l.id)}
+                        onChange={() => toggleLeadSelection(l.id)}
+                      />
+                    </td>
                     <td className="px-6 py-4 font-semibold text-slate-900 break-words">
                       {l.name || "—"}
                     </td>
@@ -625,6 +1060,12 @@ export default function LeadsPage() {
                       ) : null}
                     </td>
                     <td className="px-6 py-4 text-slate-700 break-words">
+                      {l.location || "—"}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700 break-words">
+                      {normalizeSourceName(l.source) || "—"}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700 break-words">
                       <div className="font-semibold text-slate-900">
                         {l.assignedToName || "—"}
                       </div>
@@ -644,7 +1085,7 @@ export default function LeadsPage() {
                   <tr>
                     <td
                       className="px-6 py-8 text-center text-sm font-semibold text-slate-500"
-                      colSpan={5}
+                      colSpan={8}
                     >
                       No leads found.
                     </td>
@@ -898,9 +1339,18 @@ export default function LeadsPage() {
                 setError(null);
                 setSaving(true);
                 try {
-                  await addOneLead({ name: leadName, number: leadNumber });
+                  await addOneLead({ 
+                    name: leadName, 
+                    number: leadNumber,
+                    location: leadLocation,
+                    details: leadDetails,
+                    source: leadSource
+                  });
                   setLeadName("");
                   setLeadNumber("");
+                  setLeadLocation("");
+                  setLeadDetails("");
+                  setLeadSource("");
                   setOpenAdd(false);
                 } catch (err) {
                   const message =
@@ -935,6 +1385,62 @@ export default function LeadsPage() {
                   inputMode="tel"
                   required
                 />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Location (optional)
+                </div>
+                <input
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={leadLocation}
+                  onChange={(e) => setLeadLocation(e.target.value)}
+                  placeholder="City, Area"
+                />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Details (optional)
+                </div>
+                <textarea
+                  className="mt-2 h-24 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={leadDetails}
+                  onChange={(e) => setLeadDetails(e.target.value)}
+                  placeholder="Additional information about the lead"
+                />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Source (optional)
+                </div>
+                <select
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-700 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                  value={leadSource}
+                  onChange={(e) => setLeadSource(e.target.value)}
+                >
+                  <option value="">Select source...</option>
+                  <option value="99acres">99acres</option>
+                  <option value="MagicBricks">MagicBricks</option>
+                  <option value="OLX">OLX</option>
+                  <option value="Housing.com">Housing.com</option>
+                  <option value="CommonFloor">CommonFloor</option>
+                  <option value="PropTiger">PropTiger</option>
+                  <option value="Facebook">Facebook</option>
+                  <option value="Instagram">Instagram</option>
+                  <option value="WhatsApp">WhatsApp</option>
+                  <option value="Google">Google</option>
+                  <option value="Justdial">Justdial</option>
+                  <option value="Sulekha">Sulekha</option>
+                  <option value="Quikr">Quikr</option>
+                  <option value="Direct/Referral">Direct/Referral</option>
+                  <option value="Website">Website</option>
+                  <option value="Cold Call">Cold Call</option>
+                  <option value="Walk-in">Walk-in</option>
+                  <option value="Exhibition">Exhibition</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
 
               {error ? (
@@ -973,23 +1479,23 @@ export default function LeadsPage() {
           <div
             className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
             onClick={() => {
-              if (saving) return;
+              if (excelUploading) return;
               setOpenUpload(false);
             }}
           />
-          <div className="absolute inset-y-0 right-0 w-full max-w-[620px] bg-white shadow-2xl">
+          <div className="absolute inset-y-0 right-0 w-full max-w-[520px] bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
               <div>
-                <div className="text-sm font-semibold">Upload Leads</div>
+                <div className="text-sm font-semibold">Bulk Upload Leads</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Paste lines like: Name, 9876543210 (or just 9876543210)
+                  Upload Excel file with columns: Client Name, Mob No, Location, Deta
                 </div>
               </div>
               <button
                 className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                 type="button"
                 onClick={() => {
-                  if (saving) return;
+                  if (excelUploading) return;
                   setOpenUpload(false);
                 }}
               >
@@ -997,107 +1503,82 @@ export default function LeadsPage() {
               </button>
             </div>
 
-            <form
-              className="space-y-5 p-6"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setError(null);
-                setUploadResult(null);
-                setSaving(true);
-                try {
-                  const lines = uploadText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-                  if (!lines.length) {
-                    setError("Paste at least one lead line.");
-                    return;
-                  }
-                  await uploadLeads(lines);
-                  setUploadText("");
-                } catch (err) {
-                  const message =
-                    err instanceof Error ? err.message : "Upload failed";
-                  setError(message);
-                } finally {
-                  setSaving(false);
-                }
-              }}
-            >
+            <div className="space-y-5 p-6">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Paste Leads
+                  Excel File
                 </div>
-                <textarea
-                  className="mt-2 h-[240px] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-4 focus:ring-emerald-100"
-                  value={uploadText}
-                  onChange={(e) => setUploadText(e.target.value)}
-                  placeholder={"Nikhil, 1234567890\nSahil, 0987654321\n1234567890"}
-                />
+                <div className="mt-2">
+                  <label className="flex h-32 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors">
+                    <div className="flex flex-col items-center gap-2">
+                      <FileSpreadsheet size={32} className="text-slate-400" />
+                      <span className="text-sm font-semibold text-slate-600">
+                        {excelFile ? excelFile.name : "Click to upload Excel file"}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        .xlsx, .xls files only
+                      </span>
+                    </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".xlsx,.xls"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) setExcelFile(file);
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
 
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Upload CSV / Excel (optional)
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Expected Format
                 </div>
-                <input
-                  className="mt-2 block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
-                  type="file"
-                  accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                  onChange={async (e) => {
-                    setFileError(null);
-                    const file = e.target.files?.[0] ?? null;
-                    if (!file) return;
-                    try {
-                      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-                      if (ext === "xlsx" || ext === "xls") {
-                        const buf = await file.arrayBuffer();
-                        const XLSX = await import("xlsx");
-                        const wb = XLSX.read(buf, { type: "array" });
-                        const sheetName = wb.SheetNames[0];
-                        const sheet = sheetName ? wb.Sheets[sheetName] : null;
-                        if (!sheet) {
-                          setFileError("No sheet found in the Excel file.");
-                          return;
-                        }
-                        const rows = XLSX.utils.sheet_to_json(sheet, {
-                          header: 1,
-                          raw: false,
-                          blankrows: false,
-                        }) as unknown[][];
-
-                        const lines: string[] = [];
-                        for (const r of rows) {
-                          const a = String(r?.[0] ?? "").trim();
-                          const b = String(r?.[1] ?? "").trim();
-                          if (!a && !b) continue;
-                          const name = b ? a : "";
-                          const number = b ? b : a;
-                          lines.push(name ? `${name}, ${number}` : number);
-                        }
-                        setUploadText(lines.join("\n"));
-                      } else {
-                        const text = await file.text();
-                        setUploadText(text);
-                      }
-                    } catch {
-                      setFileError("Could not read file.");
-                    }
-                  }}
-                />
-                {fileError ? (
-                  <div className="mt-2 text-xs font-semibold text-rose-600">
-                    {fileError}
-                  </div>
-                ) : null}
+                <div className="text-xs text-slate-700 space-y-1">
+                  <p>Excel file should have these columns:</p>
+                  <ul className="list-disc list-inside ml-2 space-y-1">
+                    <li><strong>Client Name</strong>: Lead name</li>
+                    <li><strong>Mob No</strong>: Phone number</li>
+                    <li><strong>Location</strong>: Location (optional)</li>
+                    <li><strong>Deta</strong>: Details (optional)</li>
+                    <li><strong>Source</strong>: Source (optional, e.g., 99acres, MagicBricks)</li>
+                  </ul>
+                </div>
               </div>
 
-              {uploadResult ? (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-                  Added {uploadResult.added}, Skipped {uploadResult.skipped}, Invalid {uploadResult.invalid}
+              {excelError ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                  {excelError}
                 </div>
               ) : null}
 
-              {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-                  {error}
+              {excelResults.success > 0 || excelResults.failed > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                    Upload Results
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">Success:</span>
+                      <span className="font-semibold text-emerald-600">{excelResults.success}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">Failed:</span>
+                      <span className="font-semibold text-rose-600">{excelResults.failed}</span>
+                    </div>
+                    {excelResults.errors.length > 0 && (
+                      <div className="mt-3">
+                        <div className="text-xs font-semibold text-slate-500 mb-1">Errors:</div>
+                        <div className="max-h-32 overflow-auto rounded-lg bg-white p-2 text-xs text-slate-700">
+                          {excelResults.errors.map((error, idx) => (
+                            <div key={idx} className="py-1">• {error}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : null}
 
@@ -1105,23 +1586,67 @@ export default function LeadsPage() {
                 <button
                   className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                   type="button"
-                  disabled={saving}
+                  disabled={excelUploading}
                   onClick={() => {
-                    if (saving) return;
+                    if (excelUploading) return;
                     setOpenUpload(false);
                   }}
                 >
                   Cancel
                 </button>
                 <button
-                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-[#0b1220] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-70"
-                  type="submit"
-                  disabled={saving}
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white shadow-sm shadow-emerald-500/25 transition-colors hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  disabled={excelUploading || !excelFile}
+                  onClick={handleExcelUpload}
                 >
-                  {saving ? "Uploading..." : "Upload & Auto-Assign"}
+                  {excelUploading ? "Uploading..." : "Upload"}
                 </button>
               </div>
-            </form>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {bulkDeleteConfirm ? (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => setBulkDeleteConfirm(false)}
+          />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-500/10 text-rose-600">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Bulk Delete Leads</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    This action cannot be undone.
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-700 mb-6">
+                Are you sure you want to delete {selectedLeads.size} lead{selectedLeads.size > 1 ? 's' : ''}? This will remove them from the system.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  onClick={() => setBulkDeleteConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white shadow-sm shadow-rose-500/25 transition-colors hover:bg-rose-600"
+                  type="button"
+                  onClick={handleBulkDeleteLeads}
+                >
+                  Delete All
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

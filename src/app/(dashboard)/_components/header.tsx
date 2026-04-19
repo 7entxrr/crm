@@ -486,9 +486,7 @@ export default function DashboardHeader({
           />
           <div className="absolute inset-y-0 left-0 w-[280px] bg-[#0b1220] text-slate-200 shadow-2xl">
             <div className="flex h-16 items-center justify-between px-5">
-              <div className="text-sm font-semibold tracking-wide">
-                Clear Lands
-              </div>
+              <img src="/src/logo.png" alt="Logo" className="h-20 w-50" />
               <button
                 type="button"
                 className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white"

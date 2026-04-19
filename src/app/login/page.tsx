@@ -86,6 +86,10 @@ export default function LoginPage() {
     if (raw) router.replace(nextPath);
   }, [router, nextPath]);
 
+  // Development mode - auto-login for localhost
+  const isDevelopment = typeof window !== "undefined" && 
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const raw = window.localStorage.getItem("clearlands_pending_otp");
@@ -193,6 +197,11 @@ export default function LoginPage() {
               <div className="mt-1 text-sm text-slate-500">
                 Enter your credentials to continue.
               </div>
+              {isDevelopment && (
+                <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                  Development Mode - Click Sign In to bypass authentication
+                </div>
+              )}
 
               <form
                 className="mt-6 space-y-4"
@@ -201,6 +210,22 @@ export default function LoginPage() {
                   setError(null);
                   setSubmitting(true);
                   try {
+                    // Development mode bypass - direct login
+                    if (isDevelopment) {
+                      if (typeof window !== "undefined") {
+                        window.localStorage.setItem(
+                          "clearlands_admin_session",
+                          JSON.stringify({
+                            email: "admin@localhost",
+                            name: "Development Admin",
+                            createdAt: Date.now(),
+                          }),
+                        );
+                      }
+                      router.replace(nextPath);
+                      return;
+                    }
+
                     const trimmedEmail = email.trim();
                     const normalized = normalizeEmail(trimmedEmail);
                     if (!normalized) {
