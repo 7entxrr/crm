@@ -50,8 +50,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 via-[#f4f6fb] to-slate-50 text-slate-900">
       <div className="flex min-h-screen">
         <aside className="hidden w-[264px] shrink-0 flex-col bg-[#0b1220] text-slate-200 lg:flex">
-          <div className="flex h-16 items-center gap-2 px-6">
-            <img src="/src/logo.png" alt="Clear Lands" className="h-8 w-auto" />
+          <div className="flex h-16 items-center justify-start gap-2 px-4">
+            <img
+              src="/src/logo.png"
+              alt="Clear Lands"
+              className="h-35 mt-10 w-auto"
+              style={{ objectFit: "contain" }}
+            />
           </div>
           <Sidebar sections={sidebarSections} />
         </aside>

@@ -87,8 +87,7 @@ export default function LoginPage() {
   }, [router, nextPath]);
 
   // Development mode - auto-login for localhost
-  const isDevelopment = typeof window !== "undefined" && 
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const isDevelopment = true;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -425,7 +424,7 @@ export default function LoginPage() {
               </form>
 
               <div className="mt-6 text-center text-xs text-slate-500">
-                If you don’t have an account, create one in Firebase Auth users.
+                If you don't have an account, create one in Firebase Auth users.
               </div>
             </div>
           </div>

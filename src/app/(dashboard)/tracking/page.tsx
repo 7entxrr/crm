@@ -20,6 +20,10 @@ type StaffRow = {
   createdAt?: Date | null;
 };
 
+const normalizeAppName = (appName: string): string => {
+  return appName === "swaraj_infra" ? "clear_lands" : appName;
+};
+
 type ActivitySession = {
   id: string;
   staffEmail: string;
@@ -97,7 +101,7 @@ export default function TrackingPage() {
                 id: `${d.id}-${index}`,
                 staffEmail: data.staffEmail!,
                 staffName,
-                appName: appUsage.appName || "Unknown App",
+                appName: normalizeAppName(appUsage.appName || "Unknown App"),
                 trackedAt: appUsage.trackedAt?.toDate ? appUsage.trackedAt.toDate() : null,
                 usageInMinutes: appUsage.usageInMinutes || 0,
                 usageInSeconds: appUsage.usageInSeconds || 0,
@@ -206,10 +210,11 @@ export default function TrackingPage() {
     const metrics = new Map<string, { appName: string; sessions: number; duration: number }>();
     
     for (const session of filteredSessions) {
-      const existing = metrics.get(session.appName) || { appName: session.appName, sessions: 0, duration: 0 };
+      const normalizedAppName = normalizeAppName(session.appName);
+      const existing = metrics.get(normalizedAppName) || { appName: normalizedAppName, sessions: 0, duration: 0 };
       existing.sessions += 1;
       existing.duration += session.usageInMinutes;
-      metrics.set(session.appName, existing);
+      metrics.set(normalizedAppName, existing);
     }
     
     return Array.from(metrics.values()).sort((a, b) => b.duration - a.duration);
@@ -217,7 +222,7 @@ export default function TrackingPage() {
 
   // Get unique apps for filter
   const uniqueApps = useMemo(() => {
-    const apps = new Set(sessions.map(s => s.appName));
+    const apps = new Set(sessions.map(s => normalizeAppName(s.appName)));
     return Array.from(apps).sort();
   }, [sessions]);
 

@@ -50,6 +50,19 @@ type CallResponseRow = {
   staffName: string;
 };
 
+type AdminSession = { email?: string; name?: string } | null;
+
+function readSession(): AdminSession {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem("clearlands_admin_session");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AdminSession;
+  } catch {
+    return null;
+  }
+}
+
 function normalizePhone(raw: string) {
   const digits = raw.replace(/\D/g, "");
   if (!digits) return "";
@@ -114,6 +127,7 @@ export default function DashboardPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [dialogTitle, setDialogTitle] = useState('');
   const [dialogLeads, setDialogLeads] = useState<LeadRow[]>([]);
+  const [adminSession, setAdminSession] = useState<AdminSession>(null);
 
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [leads, setLeads] = useState<LeadRow[]>([]);
@@ -124,6 +138,13 @@ export default function DashboardPage() {
     values: [],
   });
   const [responseWeeks, setResponseWeeks] = useState<number[]>([]);
+
+  // Read admin session to get logged-in user's name
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const session = readSession();
+    setAdminSession(session);
+  }, []);
 
   // Set loading to false when data is loaded
   useEffect(() => {
@@ -462,6 +483,16 @@ export default function DashboardPage() {
       
 
       <div className="p-6">
+        {/* Header with User Name */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
+            {adminSession?.name && (
+              <p className="mt-1 text-sm text-gray-500">Welcome back, {adminSession.name}</p>
+            )}
+          </div>
+        </div>
+
         {/* Distribution Messages */}
         {distributionError && (
           <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
